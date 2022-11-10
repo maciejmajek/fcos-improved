@@ -1,11 +1,11 @@
 import tqdm
+import wandb
 import torch
 import torch.nn as nn
 from src.fcos import FCOS
 from src.loss import IOULoss, FocalLoss
 from src.dataset import BDD100K
 from torchmetrics.classification import BinaryF1Score
-from torch.utils.tensorboard import SummaryWriter
 
 device = "cuda"
 train_iterations = 0
@@ -112,7 +112,7 @@ def test_step(
     return loss, f1s
 
 
-def train_epoch(model, loader, loss_cls, loss_reg, loss_cnt, optimizer, writer):
+def train_epoch(model, loader, loss_cls, loss_reg, loss_cnt, optimizer):
     model.train()
     epoch_loss = 0
     global train_iterations
@@ -132,13 +132,11 @@ def train_epoch(model, loader, loss_cls, loss_reg, loss_cnt, optimizer, writer):
             loss_reg,
             loss_cnt,
         )
-        writer.add_scalar("Train/Loss/cls", loss["cls"].item(), train_iterations)
-        writer.add_scalar("Train/Loss/reg", loss["reg"].item(), train_iterations)
-        writer.add_scalar("Train/Loss/cnt", loss["cnt"].item(), train_iterations)
+        log = {"Train/Loss/" + k: v.item() for k, v in loss.items()}
+
         for i, f1 in enumerate(f1s["cls"]):
-            writer.add_scalar(
-                f"Train/F1/cls_{model.strides[i]}", f1.item(), train_iterations
-            )
+            log[f"Train/F1/cls_{model.strides[i]}"] = f1.item()
+        wandb.log(log)
 
         loss = loss["cls"] + loss["reg"] + loss["cnt"]
         epoch_loss += (loss).item()
@@ -150,7 +148,7 @@ def train_epoch(model, loader, loss_cls, loss_reg, loss_cnt, optimizer, writer):
 
 
 @torch.no_grad()
-def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt, writer):
+def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt):
     model.eval()
     epoch_loss = 0
     global test_iterations
@@ -170,13 +168,11 @@ def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt, writer):
             loss_reg,
             loss_cnt,
         )
-        writer.add_scalar("Test/Loss/cls", loss["cls"].item(), test_iterations)
-        writer.add_scalar("Test/Loss/reg", loss["reg"].item(), test_iterations)
-        writer.add_scalar("Test/Loss/cnt", loss["cnt"].item(), test_iterations)
+        log = {"Test/Loss/" + k: v.item() for k, v in loss.items()}
+
         for i, f1 in enumerate(f1s["cls"]):
-            writer.add_scalar(
-                f"Test/F1/cls_{model.strides[i]}", f1.item(), test_iterations
-            )
+            log[f"Test/F1/cls_{model.strides[i]}"] = f1.item()
+        wandb.log(log)
 
         loss = loss["cls"] + loss["reg"] + loss["cnt"]
         epoch_loss += (loss).item()
@@ -186,21 +182,24 @@ def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt, writer):
 
 
 def main():
-    torch.backends.cudnn.benchmark = True
     # misc #
-    writer = SummaryWriter()
+    wandb.init(project="INZ", entity="maciejeg1337")
+    torch.backends.cudnn.benchmark = True
+
     # dataset #
     root = "/media/muzg/D8F26982F269662A/bdd100k/bdd100k/"
-    train_dataset = BDD100K(root, split="train",size=100)
-    test_dataset = BDD100K(root, split="val",size=100)
+    train_dataset = BDD100K(root, split="train")
+    test_dataset = BDD100K(root, split="val")
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=22, num_workers=5, drop_last=True
+        train_dataset, batch_size=22, num_workers=8, drop_last=True
     )
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=22, num_workers=5, drop_last=True
+        test_dataset, batch_size=22, num_workers=8, drop_last=True
     )
+
     # model #
     model = FCOS().to(device)
+    wandb.watch(model)
     optim = torch.optim.SGD(model.parameters(), lr=1e-3)
     for param in model.backbone_fpn.backbone.parameters():
         param.requires_grad = False
@@ -210,12 +209,12 @@ def main():
     loss_reg = IOULoss()
     for i in range(10):
         train_loss = train_epoch(
-            model, train_loader, loss_cls, loss_reg, loss_cnt, optim, writer
+            model, train_loader, loss_cls, loss_reg, loss_cnt, optim
         )
-        writer.add_scalar("Train/Loss", train_loss, train_iterations)
-        torch.save(model.state_dict(),f"model_epoch_{i}.pth")
-        test_loss = test_epoch(model, test_loader, loss_cls, loss_reg, loss_cnt, writer)
-        writer.add_scalar("Test/Loss", test_loss, test_iterations)
+        wandb.log({"Train/Loss": train_loss})
+        torch.save(model.state_dict(), f"models/model_epoch_256{i}.pth")
+        test_loss = test_epoch(model, test_loader, loss_cls, loss_reg, loss_cnt)
+        wandb.log({"Test/Loss": test_loss})
 
 
 if __name__ == "__main__":
