@@ -2,6 +2,7 @@ import tqdm
 import wandb
 import torch
 import torch.nn as nn
+import gin.torch
 from src.fcos import FCOS
 from src.loss import IOULoss, FocalLoss
 from src.dataset import BDD100K
@@ -180,9 +181,24 @@ def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt):
 
     return epoch_loss / len(loader)
 
+@gin.configurable
+def get_optimizer(model, optimizer='AdamW', lr=1e-3):
+    return getattr(torch.optim, optimizer)(model.parameters(), lr)
+
+@gin.configurable
+def freeze_backbone(model, freeze=False):
+    if freeze:
+        for param in model.backbone_fpn.backbone.parameters():
+            param.requires_grad = False
+    return model
+
+@gin.configurable
+def save_model(model, i, prefix='model_', suffix="None"):
+    torch.save(model.state_dict(), f'{prefix}{i}{suffix}.pth')
 
 def main():
     # misc #
+    cfg = gin.parse_config_file('scripts/config.gin')
     wandb.init(project="INZ", entity="maciejeg1337")
     torch.backends.cudnn.benchmark = True
 
@@ -200,19 +216,19 @@ def main():
     # model #
     model = FCOS().to(device)
     wandb.watch(model)
-    optim = torch.optim.SGD(model.parameters(), lr=1e-3)
-    for param in model.backbone_fpn.backbone.parameters():
-        param.requires_grad = False
+    optim = get_optimizer(model)
+    model = freeze_backbone(model)
 
     loss_cls = FocalLoss(reduction="mean")
     loss_cnt = nn.BCEWithLogitsLoss()
     loss_reg = IOULoss()
+
     for i in range(10):
         train_loss = train_epoch(
             model, train_loader, loss_cls, loss_reg, loss_cnt, optim
         )
         wandb.log({"Train/Loss": train_loss})
-        torch.save(model.state_dict(), f"models/model_epoch_256{i}.pth")
+        save_model(model, i)
         test_loss = test_epoch(model, test_loader, loss_cls, loss_reg, loss_cnt)
         wandb.log({"Test/Loss": test_loss})
 

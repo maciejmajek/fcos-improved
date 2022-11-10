@@ -1,20 +1,23 @@
 import torch
 import torch.nn as nn
+import gin.torch
 from src.utils import BackboneFPN
 
-
+@gin.configurable
 class FCOS(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, backbone_depth=128, tower_depth=4):
         super().__init__()
+        self.backbone_depth = backbone_depth
+        self.tower_depth = tower_depth
         self.strides = torch.tensor([8, 16, 32, 64, 128])
-        self.backbone_fpn = BackboneFPN(depth=128, return_list=True)
+        self.backbone_fpn = BackboneFPN(depth=self.backbone_depth, return_list=True)
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()
         self.exp_params = nn.ParameterList(
             [nn.Parameter(torch.tensor(float(8))) for i in range(5)]
         )
 
-        for _ in range(4):
+        for _ in range(tower_depth):
             self.cls_tower.append(
                 nn.Conv2d(
                     self.backbone_fpn.depth, self.backbone_fpn.depth, 3, padding=1
