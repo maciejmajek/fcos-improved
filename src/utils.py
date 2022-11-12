@@ -100,7 +100,7 @@ def get_reg_target(boxes, strides, box_target_stride, device):
             try:
                 maps_reg[int(stride)][:, j, i] = torch.tensor([l, t, r, b])
             except IndexError as e:
-                print(e)
+                pass  # print(e)
     return maps_reg
 
 

@@ -49,14 +49,14 @@ class IOULoss(nn.Module):
             raise NotImplementedError
 
         if weight is not None and weight.sum() > 0:
-            return (losses * weight).sum()
+            return (losses * weight).sum() / weight.sum()
         else:
             assert losses.numel() != 0
             return losses.mean()
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, reduction="sum", alpha=4, gamma=3):
+    def __init__(self, reduction="sum", alpha=0.25, gamma=2.0):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
@@ -67,4 +67,9 @@ class FocalLoss(nn.Module):
             inputs.squeeze(), targets.float(), reduction=self.reduction
         )
         loss = self.alpha * (1 - torch.exp(-bce_loss)) ** self.gamma * bce_loss
+        if self.reduction == "sum":
+            if targets.sum() > 0:
+                loss = loss / targets.sum()
+            else:
+                loss = loss / targets.numel()
         return loss

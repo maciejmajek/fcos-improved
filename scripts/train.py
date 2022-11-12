@@ -12,7 +12,7 @@ device = "cuda"
 train_iterations = 0
 test_iterations = 0
 
-f1 = BinaryF1Score(threshold=0.1).to(device)
+f1 = BinaryF1Score(threshold=0.5).to(device)
 
 
 def get_f1(prediction, target):
@@ -55,7 +55,7 @@ def train_step(
             x.to(device, non_blocking=True) for x in [t_cls, t_reg, t_cnt]
         ]
         loss["cls"] += loss_fn_cls(p_cls.squeeze(1), t_cls)
-        loss["reg"] += loss_fn_reg(p_reg, t_reg)
+        loss["reg"] += loss_fn_reg(p_reg, t_reg, (t_cls > 0).float())
         loss["cnt"] += loss_fn_cnt(p_cnt.squeeze(1), t_cnt)
         f1s["cls"].append(get_f1(p_cls, t_cls))
         pos_cls += (t_cls != 0).sum()
@@ -181,9 +181,11 @@ def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt):
 
     return epoch_loss / len(loader)
 
+
 @gin.configurable
-def get_optimizer(model, optimizer='AdamW', lr=1e-3):
+def get_optimizer(model, optimizer="AdamW", lr=1e-3):
     return getattr(torch.optim, optimizer)(model.parameters(), lr)
+
 
 @gin.configurable
 def freeze_backbone(model, freeze=False):
@@ -192,13 +194,15 @@ def freeze_backbone(model, freeze=False):
             param.requires_grad = False
     return model
 
+
 @gin.configurable
-def save_model(model, i, prefix='model_', suffix="None"):
-    torch.save(model.state_dict(), f'{prefix}{i}{suffix}.pth')
+def save_model(model, i, prefix="model_", suffix="None"):
+    torch.save(model.state_dict(), f"{prefix}{i}{suffix}.pth")
+
 
 def main():
     # misc #
-    cfg = gin.parse_config_file('scripts/config.gin')
+    cfg = gin.parse_config_file("scripts/config.gin")
     wandb.init(project="INZ", entity="maciejeg1337")
     torch.backends.cudnn.benchmark = True
 
@@ -219,9 +223,9 @@ def main():
     optim = get_optimizer(model)
     model = freeze_backbone(model)
 
-    loss_cls = FocalLoss(reduction="mean")
+    loss_cls = FocalLoss(reduction="sum")
     loss_cnt = nn.BCEWithLogitsLoss()
-    loss_reg = IOULoss()
+    loss_reg = IOULoss(loss_type="iou")
 
     for i in range(10):
         train_loss = train_epoch(

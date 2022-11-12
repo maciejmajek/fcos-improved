@@ -3,6 +3,7 @@ import torch.nn as nn
 import gin.torch
 from src.utils import BackboneFPN
 
+
 @gin.configurable
 class FCOS(torch.nn.Module):
     def __init__(self, backbone_depth=128, tower_depth=4):
@@ -14,7 +15,7 @@ class FCOS(torch.nn.Module):
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()
         self.exp_params = nn.ParameterList(
-            [nn.Parameter(torch.tensor(float(8))) for i in range(5)]
+            [nn.Parameter(torch.tensor(float(2 ** (4 - i)))) for i in range(5)]
         )
 
         for _ in range(tower_depth):

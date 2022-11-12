@@ -13,3 +13,4 @@ runs
 *.log
 models
 wandb
+notebooks
