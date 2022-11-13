@@ -1,3 +1,4 @@
+import os
 import tqdm
 import wandb
 import torch
@@ -56,7 +57,10 @@ def train_step(
             x.to(device, non_blocking=True) for x in [t_cls, t_reg, t_cnt]
         ]
         loss["cls"] += loss_fn_cls(p_cls.squeeze(1), t_cls)
-        loss["reg"] += (loss_fn_reg(p_reg, t_reg).mean(1) * t_cls).mean()
+        if t_cnt.sum() > 0:
+            loss["reg"] += (loss_fn_reg(p_reg, t_reg).sum(1) * t_cnt).sum() / t_cnt.sum()
+        else:
+            loss["reg"] += (loss_fn_reg(p_reg, t_reg).sum(1)).mean() * 0
         loss["cnt"] += loss_fn_cnt(p_cnt.squeeze(1), t_cnt)
         f1s["cls"].append(get_f1(p_cls, t_cls))
         pos_cls += (t_cls != 0).sum()
@@ -103,8 +107,12 @@ def test_step(
             x.to(device, non_blocking=True) for x in [t_cls, t_reg, t_cnt]
         ]
         loss["cls"] += loss_fn_cls(p_cls.squeeze(1), t_cls)
-        loss["reg"] += (loss_fn_reg(p_reg, t_reg).mean(1) * t_cls).mean()
+        if t_cnt.sum() > 0:
+            loss["reg"] += (loss_fn_reg(p_reg, t_reg).sum(1) * t_cnt).sum() / t_cnt.sum()
+        else:
+            loss["reg"] += (loss_fn_reg(p_reg, t_reg).sum(1)).mean() * 0
         loss["cnt"] += loss_fn_cnt(p_cnt.squeeze(1), t_cnt)
+
         f1s["cls"].append(get_f1(p_cls, t_cls))
         pos_cls += (t_cls != 0).sum()
 
@@ -144,6 +152,7 @@ def train_epoch(
 
         for i, f1 in enumerate(f1s["cls"]):
             log[f"Train/F1/cls_{model.strides[i]}"] = f1.item()
+        log['iterations/train'] = train_iterations
         wandb.log(log)
 
         loss = loss["cls"] + loss["reg"] + loss["cnt"]
@@ -180,6 +189,7 @@ def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt):
 
         for i, f1 in enumerate(f1s["cls"]):
             log[f"Test/F1/cls_{model.strides[i]}"] = f1.item()
+        log['iterations/test'] = test_iterations
         wandb.log(log)
 
         loss = loss["cls"] + loss["reg"] + loss["cnt"]
@@ -203,8 +213,14 @@ def freeze_backbone(model, freeze=False):
 
 
 @gin.configurable
-def save_model(model, i, prefix="model_", suffix="None"):
-    torch.save(model.state_dict(), f"{prefix}{i}{suffix}.pth")
+def save_model(model, i, prefix="model_", suffix="None", folder_name=None):
+    if folder_name:
+        folder_name = 'zoo-' + folder_name
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name)
+        torch.save(model.state_dict(), f"{folder_name}/{prefix}{i}{suffix}.pth")
+    else:
+        torch.save(model.state_dict(), f"{prefix}{i}{suffix}.pth")
 
 
 def main():
@@ -232,7 +248,7 @@ def main():
 
     loss_cls = FocalLoss(reduction="sum")
     loss_cnt = nn.BCEWithLogitsLoss()
-    loss_reg = nn.L1Loss(reduction="none")  # IOULoss(loss_type="linear_iou")
+    loss_reg = nn.L1Loss(reduction="none")  # IOULoss(loss_type="iou")
 
     transforms = T.Compose(
         [
@@ -252,7 +268,7 @@ def main():
             optim,
         )
         wandb.log({"Train/Loss": train_loss})
-        save_model(model, i)
+        save_model(model, i, folder_name=wandb.run.name)
         test_loss = test_epoch(model, test_loader, loss_cls, loss_reg, loss_cnt)
         wandb.log({"Test/Loss": test_loss})
 
