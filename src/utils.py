@@ -2,7 +2,7 @@ import timm
 import torch
 from collections import OrderedDict
 from torchvision.ops import FeaturePyramidNetwork
-
+from torchvision.models.resnet import resnet18, ResNet18_Weights
 
 INF = 10**10
 h, w = 6 * 128, 9 * 128
@@ -38,14 +38,14 @@ def locations_inside_box(box):
     return torch.cartesian_prod(x, y)
 
 
-def calculate_centerness(l, t, r, b, sign="addition"):
+def calculate_centerness(l, t, r, b, sign="multiplication"):
     if sign == "addition":
         return torch.sqrt(
-            1 + torch.min(l, r) / torch.max(l, r) + torch.min(t, b) / torch.max(t, b)
+            torch.min(l, r) / torch.max(l, r) + torch.min(t, b) / torch.max(t, b)
         )
     if sign == "multiplication":
         return torch.sqrt(
-            1 + torch.min(l, r) / torch.max(l, r) + torch.min(t, b) / torch.max(t, b)
+            torch.min(l, r) / torch.max(l, r) * torch.min(t, b) / torch.max(t, b)
         )
     raise "Not implemented"
 
@@ -77,6 +77,8 @@ def get_cls_target(boxes, strides, box_target_stride, labels, device):
                 and i < maps_cls[int(stride)].shape[1]
             ):
                 maps_cls[int(stride)][j, i] = labels[ij]
+        assert maps_cls[int(stride)].max() <= 1.0
+        assert maps_cls[int(stride)].min() >= 0.0
     return maps_cls
 
 
@@ -101,6 +103,8 @@ def get_reg_target(boxes, strides, box_target_stride, device):
                 maps_reg[int(stride)][:, j, i] = torch.tensor([l, t, r, b])
             except IndexError as e:
                 pass  # print(e)
+
+        assert maps_reg[int(stride)].min() >= 0.0
     return maps_reg
 
 
@@ -115,6 +119,8 @@ def get_cnt_target(boxes, strides, maps_reg, device):
         l, t, r, b = value
         maps_cnt[key] = calculate_centerness(l, t, r, b)
         maps_cnt[key][maps_cnt[key].isnan()] = 0
+        assert maps_cnt[key].max() <= 1.0, f"Max is {maps_cnt[key].max()}"
+        assert maps_cnt[key].min() >= 0.0, f"Min is {maps_cnt[key].min()}"
     return maps_cnt
 
 
@@ -403,18 +409,18 @@ class BoxList(object):
 class ResnetBacbone(torch.nn.Module):
     def __init__(self, size="50"):
         super().__init__()
-        self.model = timm.create_model("resnet" + size, pretrained=True)
+        self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
         self.pre = torch.nn.Sequential(
             self.model.conv1,
             self.model.bn1,
-            self.model.act1,
+            self.model.relu,
             self.model.maxpool,
         )
         self.l1 = self.model.layer1
         self.l2 = self.model.layer2
         self.l3 = self.model.layer3
         self.l4 = self.model.layer4
-        self.depth_channels = [512, 1024, 2048]
+        self.depth_channels = [128, 256, 512]
 
     def forward(self, x):
         x = self.pre(x)
