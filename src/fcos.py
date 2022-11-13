@@ -4,6 +4,15 @@ import gin.torch
 from src.utils import BackboneFPN
 
 
+class Scale(nn.Module):
+    def __init__(self, init_value=1.0):
+        super(Scale, self).__init__()
+        self.scale = nn.Parameter(torch.FloatTensor([init_value]))
+
+    def forward(self, input):
+        return input * self.scale
+
+
 @gin.configurable
 class FCOS(torch.nn.Module):
     def __init__(self, backbone_depth=128, tower_depth=4):
@@ -14,9 +23,7 @@ class FCOS(torch.nn.Module):
         self.backbone_fpn = BackboneFPN(depth=self.backbone_depth, return_list=True)
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()
-        self.exp_params = nn.ParameterList(
-            [nn.Parameter(torch.tensor(float(2 ** (4 - i)))) for i in range(5)]
-        )
+        self.scales = nn.ModuleList([Scale(init_value=1.0) for _ in range(5)])
 
         for _ in range(tower_depth):
             self.cls_tower.append(
@@ -42,12 +49,26 @@ class FCOS(torch.nn.Module):
         )
         self.cnt = nn.Conv2d(self.backbone_fpn.depth, 1, 3, padding=1)
         self.reg = nn.Conv2d(self.backbone_fpn.depth, 4, 3, padding=1)
-        for modules in [self.cls_tower, self.bbox_tower, self.cls, self.reg, self.cnt]:
 
+        for modules in [self.cls_tower, self.bbox_tower]:
             for l in modules.modules():
                 if isinstance(l, nn.Conv2d):
                     torch.nn.init.normal_(l.weight, std=0.01)
                     torch.nn.init.constant_(l.bias, 0)
+
+        for modules in [self.cls, self.cnt]:
+            for l in modules.modules():
+                if isinstance(l, nn.Conv2d):
+                    torch.nn.init.normal_(l.weight, std=0.01)
+                    torch.nn.init.constant_(
+                        l.bias, -torch.log(torch.tensor((1 - 0.01) / 0.01))
+                    )
+
+        for modules in [self.reg]:
+            for l in modules.modules():
+                if isinstance(l, nn.Conv2d):
+                    torch.nn.init.normal_(l.weight, std=0.01)
+                    torch.nn.init.constant_(l.bias, 1)
 
     def forward(self, x):
         x = self.backbone_fpn(x)
@@ -60,6 +81,18 @@ class FCOS(torch.nn.Module):
             cnt.append(self.cnt(l))
 
         for i, l in enumerate([self.bbox_tower(i) for i in x]):
-            reg.append(torch.exp(self.reg(l) * self.exp_params[i]))
+            box_pred = self.scales[i](self.reg(l))
+            reg.append(torch.exp(box_pred))
+
+        for i in range(len(self.strides)):
+            assert (
+                reg[i].min() >= 0.0
+            ), f"Min is {reg[i].min()} Max is {reg[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
+            assert (
+                cls[i].min() >= 0.0
+            ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
+            assert (
+                cls[i].max() <= 1.0
+            ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
 
         return cls, reg, cnt
