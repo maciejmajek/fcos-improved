@@ -7,12 +7,13 @@ from src.fcos import FCOS
 from src.loss import IOULoss, FocalLoss
 from src.dataset import BDD100K
 from torchmetrics.classification import BinaryF1Score
+import torchvision.transforms as T
 
 device = "cuda"
 train_iterations = 0
 test_iterations = 0
 
-f1 = BinaryF1Score(threshold=0.5).to(device)
+f1 = BinaryF1Score(threshold=0.1).to(device)
 
 
 def get_f1(prediction, target):
@@ -55,7 +56,7 @@ def train_step(
             x.to(device, non_blocking=True) for x in [t_cls, t_reg, t_cnt]
         ]
         loss["cls"] += loss_fn_cls(p_cls.squeeze(1), t_cls)
-        loss["reg"] += loss_fn_reg(p_reg, t_reg, (t_cls > 0).float())
+        loss["reg"] += (loss_fn_reg(p_reg, t_reg).mean(1) * t_cls).mean()
         loss["cnt"] += loss_fn_cnt(p_cnt.squeeze(1), t_cnt)
         f1s["cls"].append(get_f1(p_cls, t_cls))
         pos_cls += (t_cls != 0).sum()
@@ -102,7 +103,7 @@ def test_step(
             x.to(device, non_blocking=True) for x in [t_cls, t_reg, t_cnt]
         ]
         loss["cls"] += loss_fn_cls(p_cls.squeeze(1), t_cls)
-        loss["reg"] += loss_fn_reg(p_reg, t_reg)
+        loss["reg"] += (loss_fn_reg(p_reg, t_reg).mean(1) * t_cls).mean()
         loss["cnt"] += loss_fn_cnt(p_cnt.squeeze(1), t_cnt)
         f1s["cls"].append(get_f1(p_cls, t_cls))
         pos_cls += (t_cls != 0).sum()
@@ -113,13 +114,19 @@ def test_step(
     return loss, f1s
 
 
-def train_epoch(model, loader, loss_cls, loss_reg, loss_cnt, optimizer):
+def train_epoch(
+    model, loader, loss_cls, loss_reg, loss_cnt, optimizer, transforms=None
+):
     model.train()
     epoch_loss = 0
     global train_iterations
     for img, maps_cls, maps_reg, maps_cnt in tqdm.tqdm(loader):
-
+        optimizer.zero_grad()
         img = img.to(device)
+        if transforms:
+            img = (255 * img).type(torch.uint8)
+            img = transforms(img)
+            img = img / 255.0
 
         loss, f1s = train_step(
             model,
@@ -211,10 +218,10 @@ def main():
     train_dataset = BDD100K(root, split="train")
     test_dataset = BDD100K(root, split="val")
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=22, num_workers=8, drop_last=True
+        train_dataset, batch_size=16, num_workers=8, drop_last=True
     )
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=22, num_workers=8, drop_last=True
+        test_dataset, batch_size=16, num_workers=8, drop_last=True
     )
 
     # model #
@@ -225,11 +232,24 @@ def main():
 
     loss_cls = FocalLoss(reduction="sum")
     loss_cnt = nn.BCEWithLogitsLoss()
-    loss_reg = IOULoss(loss_type="iou")
+    loss_reg = nn.L1Loss(reduction="none")  # IOULoss(loss_type="linear_iou")
+
+    transforms = T.Compose(
+        [
+            T.RandomEqualize(),
+            T.RandomGrayscale(),
+            T.RandomAutocontrast(),
+        ]
+    )
 
     for i in range(10):
         train_loss = train_epoch(
-            model, train_loader, loss_cls, loss_reg, loss_cnt, optim
+            model,
+            train_loader,
+            loss_cls,
+            loss_reg,
+            loss_cnt,
+            optim,
         )
         wandb.log({"Train/Loss": train_loss})
         save_model(model, i)
