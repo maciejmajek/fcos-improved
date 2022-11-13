@@ -146,7 +146,11 @@ def get_targets(boxes, strides, sizes, device):
     maps_cls = get_cls_target(boxes, strides, box_target_stride, labels, device)
     maps_reg = get_reg_target(boxes, strides, box_target_stride, device)
     maps_cnt = get_cnt_target(boxes, strides, maps_reg, device)
-
+    for key in maps_cls:
+        maps_cnt[key] = maps_cnt[key] * maps_cls[key]
+        reg = torch.zeros_like(maps_reg[key])
+        reg[:, maps_cls[key].bool()] = maps_reg[key][:, maps_cls[key].bool()]
+        maps_reg[key] = reg
     return maps_cls, maps_reg, maps_cnt
 
 
