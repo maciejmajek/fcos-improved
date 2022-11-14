@@ -23,6 +23,7 @@ class FCOS(torch.nn.Module):
         self.backbone_fpn = BackboneFPN(depth=self.backbone_depth, return_list=True)
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()
+
         self.scales = nn.ModuleList([Scale(init_value=1.0) for _ in range(5)])
 
         for _ in range(tower_depth):
@@ -50,7 +51,7 @@ class FCOS(torch.nn.Module):
         self.cnt = nn.Conv2d(self.backbone_fpn.depth, 1, 3, padding=1)
         self.reg = nn.Conv2d(self.backbone_fpn.depth, 4, 3, padding=1)
 
-        for modules in [self.cls_tower, self.bbox_tower]:
+        for modules in [self.cls_tower, self.bbox_tower, self.reg]:
             for l in modules.modules():
                 if isinstance(l, nn.Conv2d):
                     torch.nn.init.normal_(l.weight, std=0.01)
@@ -63,12 +64,6 @@ class FCOS(torch.nn.Module):
                     torch.nn.init.constant_(
                         l.bias, -torch.log(torch.tensor((1 - 0.01) / 0.01))
                     )
-
-        for modules in [self.reg]:
-            for l in modules.modules():
-                if isinstance(l, nn.Conv2d):
-                    torch.nn.init.normal_(l.weight, std=0.01)
-                    torch.nn.init.constant_(l.bias, 1)
 
     def forward(self, x):
         x = self.backbone_fpn(x)
