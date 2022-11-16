@@ -1,5 +1,6 @@
 import timm
 import torch
+import torch.nn as nn
 from collections import OrderedDict
 from torchvision.ops import FeaturePyramidNetwork
 from torchvision.models.resnet import resnet18, ResNet18_Weights
@@ -475,4 +476,25 @@ class BackboneFPN(torch.nn.Module):
         x["feat4"] = x1["feat4"]
         if self.return_list:
             return list(x.values())
+        return x
+
+
+class SegmentationHead(nn.Module):
+    def __init__(self, fpn_depth=128, tower_depth=4):
+        super().__init__()
+        self.fpn_depth = fpn_depth
+        self.tower_depth = tower_depth
+        self.head_tower = nn.ModuleList()
+        self.cls = nn.Conv2d(self.fpn_depth, 1, 3, padding=1)
+        for _ in range(self.tower_depth):
+            self.head_tower.append(
+                nn.Conv2d(self.fpn_depth, self.fpn_depth, 3, padding=1)
+            )
+            self.head_tower.append(nn.GroupNorm(32, self.fpn_depth))
+            self.head_tower.append(nn.ReLU())
+
+    def forward(self, x):
+        for layer in self.head_tower:
+            x = layer(x)
+        x = self.cls(x)
         return x
