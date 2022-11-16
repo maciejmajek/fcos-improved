@@ -24,7 +24,7 @@ class FCOS(torch.nn.Module):
         self.backbone_fpn = BackboneFPN(depth=self.backbone_depth, return_list=True)
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()
-        self.segmentation_head = SegmentationHead(self.backbone_depth, self.strides)
+        self.segmentation_head = SegmentationHead(self.backbone_depth, self.tower_depth)
         self.scales = nn.ModuleList([Scale(init_value=1.0) for _ in range(5)])
 
         for _ in range(tower_depth):
