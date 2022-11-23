@@ -3,40 +3,41 @@ import json
 import torch
 import torchvision.transforms as T
 from torchvision.io import read_image
+from torchvision.transforms.functional import InterpolationMode
 from src.utils import BoxList
 from src.utils import get_targets
 from src.utils import object_sizes_of_interest
 
 
-categories = {
-    1: "pedestrian",
-    2: "rider",
-    3: "car",
-    4: "truck",
-    5: "bus",
-    6: "train",
-    7: "motorcycle",
-    8: "bicycle",
-    9: "traffic light",
-    10: "traffic sign",
-    0: "other vehicle",
-}
-cat_to_num = {v: k for k, v in categories.items()}
+# categories = {
+#    1: "pedestrian",
+#    2: "rider",
+#    3: "car",
+#    4: "truck",
+#    5: "bus",
+#    6: "train",
+#    7: "motorcycle",
+#    8: "bicycle",
+#    9: "traffic light",
+#    10: "traffic sign",
+#    0: "other vehicle",
+# }
+# cat_to_num = {v: k for k, v in categories.items()}
 
 cat_to_num = {
-    "pedestrian": 1,
-    "rider": 1,
+    "pedestrian": 0,
+    "rider": 0,
     "car": 1,
     "truck": 1,
     "bus": 1,
-    "train": 1,
-    "motorcycle": 1,
-    "bicycle": 1,
-    "traffic light": 1,
-    "traffic sign": 1,
-    "other vehicle": 1,
-    "other person": 1,
-    "trailer": 1,
+    "train": 0,
+    "motorcycle": 0,
+    "bicycle": 0,
+    "traffic light": 0,
+    "traffic sign": 0,
+    "other vehicle": 0,
+    "other person": 0,
+    "trailer": 0,
 }
 
 
@@ -237,15 +238,26 @@ bad_ids = [
 
 
 class BDD100K(torch.utils.data.Dataset):
-    def __init__(self, root, split, size=100_000):
+    def __init__(
+        self,
+        root,
+        split,
+        size=100_000,
+        return_detection=True,
+        return_drivable_area=False,
+    ):
         super().__init__()
         self.root = root
         self.split = split
         self.size = size
+        self.return_detection = return_detection
+        self.return_drivable = return_drivable_area
         self.det = json.load(
             open(f"{self.root}/labels/det_20/det_{self.split}.json", "r")
         )
         self.images = os.listdir(f"{self.root}/images/100k/{self.split}")
+        self.images_path = f"{self.root}/images/100k/{self.split}"
+        self.drivable_path = f"{self.root}/labels/drivable/masks/{self.split}"
         self._preprocess_det()
         self._preprocess_images()
 
@@ -264,20 +276,33 @@ class BDD100K(torch.utils.data.Dataset):
 
     def _get_final(self, data, idx):
         strides = torch.tensor([8, 16, 32, 64, 128])
-
-        box_list = get_trainable_targets(data, self.images[idx])
-        maps_cls, maps_reg, maps_cnt = get_targets(
-            box_list, strides, object_sizes_of_interest, "cpu"
-        )
-
         h, w = 6 * 128, 9 * 128
         resize = T.Resize((h, w))
-        img = read_image(
-            self.root + r"images/100k/" + self.split + "/" + self.images[idx]
+        resize_no_interp = T.Resize(
+            (h // strides[0], w // strides[0]), interpolation=InterpolationMode.NEAREST
         )
+        img = read_image(self.images_path + "/" + self.images[idx])
         img = resize(img)
         img = img / 255.0
-        return img, maps_cls, maps_reg, maps_cnt
+        returns = [img]
+
+        if self.return_detection:
+            box_list = get_trainable_targets(data, self.images[idx])
+            maps_cls, maps_reg, maps_cnt = get_targets(
+                box_list, strides, object_sizes_of_interest, "cpu"
+            )
+            returns += [maps_cls, maps_reg, maps_cnt]
+
+        if self.return_drivable:
+            drivable_area = read_image(
+                f"{self.drivable_path}/{self.images[idx].replace('jpg', 'png')}"
+            )
+            drivable_area[drivable_area != 2] = 1
+            drivable_area[drivable_area == 2] = 0
+            drivable_area = resize_no_interp(drivable_area)
+            returns.append(drivable_area.long())
+
+        return returns
 
     def __getitem__(self, idx):
         return self._get_final(self.det, idx)

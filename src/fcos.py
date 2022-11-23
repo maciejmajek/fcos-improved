@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import gin.torch
 from src.utils import BackboneFPN
+from src.utils import SegmentationHead
 
 
 class Scale(nn.Module):
@@ -23,7 +24,7 @@ class FCOS(torch.nn.Module):
         self.backbone_fpn = BackboneFPN(depth=self.backbone_depth, return_list=True)
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()
-
+        self.segmentation_head = SegmentationHead(self.backbone_depth, self.tower_depth)
         self.scales = nn.ModuleList([Scale(init_value=1.0) for _ in range(5)])
 
         for _ in range(tower_depth):
@@ -67,6 +68,8 @@ class FCOS(torch.nn.Module):
 
     def forward(self, x):
         x = self.backbone_fpn(x)
+        da = self.segmentation_head(x[0])
+
         cls = []
         reg = []
         cnt = []
@@ -90,4 +93,4 @@ class FCOS(torch.nn.Module):
                 cls[i].max() <= 1.0
             ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
 
-        return cls, reg, cnt
+        return cls, reg, cnt, da
