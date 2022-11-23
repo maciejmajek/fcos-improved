@@ -9,12 +9,14 @@ from src.loss import IOULoss, FocalLoss
 from src.dataset import BDD100K
 from torchmetrics.classification import BinaryAUROC
 import torchvision.transforms as T
+import matplotlib.pyplot as plt
+
 
 device = "cuda"
 train_iterations = 0
 test_iterations = 0
 
-bauroc = BinaryAUROC(thresholds=10).to(device)
+bauroc = BinaryAUROC(thresholds=10, average="weighted").to(device)
 
 
 @torch.no_grad()
@@ -23,6 +25,7 @@ def get_auc_roc(prediction, target):
         score = bauroc(prediction.flatten(), target.flatten().long())
     else:
         score = bauroc(nn.Sigmoid()(prediction.flatten()), target.flatten().long())
+
     return score
 
 
@@ -39,6 +42,7 @@ def train_step(
     loss_fn_reg,
     loss_fn_cnt,
     loss_fn_da,
+    scheduler,
 ):
     cls_pred, reg_pred, cnt_pred, da_pred = model(img)
     loss = {
@@ -79,6 +83,7 @@ def train_step(
     loss["cls"] = loss["cls"] / loader.batch_size
     loss["reg"] = loss["reg"] / loader.batch_size
     loss["cnt"] = loss["cnt"] / loader.batch_size
+
     return loss, auc_rocs
 
 
@@ -139,7 +144,15 @@ def test_step(
 
 
 def train_epoch(
-    model, loader, loss_cls, loss_reg, loss_cnt, loss_da, optimizer, transforms=None
+    model,
+    loader,
+    loss_cls,
+    loss_reg,
+    loss_cnt,
+    loss_da,
+    optimizer,
+    scheduler=None,
+    transforms=None,
 ):
     model.train()
     epoch_loss = 0
@@ -166,6 +179,7 @@ def train_epoch(
             loss_reg,
             loss_cnt,
             loss_da,
+            scheduler,
         )
         log = {"Train/Loss/" + k: v.item() for k, v in loss.items()}
         if auc_rocs["da"] != 0:
@@ -173,12 +187,15 @@ def train_epoch(
                 log[f"Train/ROCAUC/cls_{model.strides[i]}"] = f1.item()
             log["Train/ROCAUC/da"] = auc_rocs["da"]
         log["iterations/train"] = train_iterations
+        log["lr"] = scheduler.get_last_lr()[-1]
         wandb.log(log)
 
         loss = loss["cls"] + loss["reg"] + loss["cnt"] + loss["da"]
         epoch_loss += (loss).item()
         loss.backward()
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
         train_iterations += loader.batch_size
 
     return epoch_loss / len(loader)
@@ -231,6 +248,16 @@ def freeze_backbone(model, freeze=False):
     if freeze:
         for param in model.backbone_fpn.backbone.parameters():
             param.requires_grad = False
+
+        for param in model.backbone_fpn.backbone.model.layer4.parameters():
+            param.requires_grad = True
+
+        for param in model.backbone_fpn.backbone.model.layer3.parameters():
+            param.requires_grad = True
+
+        for param in model.backbone_fpn.backbone.model.layer2.parameters():
+            param.requires_grad = True
+
     return model
 
 
@@ -248,7 +275,6 @@ def save_model(model, i, prefix="model_", suffix="None", folder_name=None):
 def main():
     # misc #
     cfg = gin.parse_config_file("scripts/config.gin")
-    wandb.init(project="INZ", entity="maciejeg1337")
     torch.backends.cudnn.benchmark = True
 
     # dataset #
@@ -264,13 +290,20 @@ def main():
 
     # model #
     model = FCOS().to(device)
+    config = {
+        "model_size": sum([p.numel() for p in model.parameters()]),
+    }
+    print(config)
+    wandb.init(project="INZ", entity="maciejeg1337", config=config)
     wandb.watch(model)
     optim = get_optimizer(model)
     model = freeze_backbone(model)
-
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optim, 0.1, 2 * len(train_loader), div_factor=5000
+    )
     loss_cls = FocalLoss(reduction="sum")
     loss_cnt = nn.BCEWithLogitsLoss()
-    loss_reg = nn.L1Loss(reduction="none")  # IOULoss(loss_type="iou")
+    loss_reg = nn.L1Loss(reduction="none")
     loss_da = nn.BCEWithLogitsLoss()
     transforms = T.Compose(
         [
@@ -280,7 +313,7 @@ def main():
         ]
     )
 
-    for i in range(10):
+    for i in range(30):
         train_loss = train_epoch(
             model,
             train_loader,
@@ -289,6 +322,7 @@ def main():
             loss_cnt,
             loss_da,
             optim,
+            scheduler,
         )
         wandb.log({"Train/Loss": train_loss})
         save_model(model, i, folder_name=wandb.run.name)
