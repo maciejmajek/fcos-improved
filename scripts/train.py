@@ -5,26 +5,31 @@ import torch
 import torch.nn as nn
 import gin.torch
 from src.fcos import FCOS
-from src.loss import IOULoss, FocalLoss
+from src.loss import IOULoss, FocalLoss, MulticlassFocalLoss
 from src.dataset import BDD100K
+from src.dataset import cat_to_num
 from torchmetrics.classification import BinaryAUROC
+from torchmetrics.classification import MulticlassAUROC
 import torchvision.transforms as T
-import matplotlib.pyplot as plt
 
 
 device = "cuda"
 train_iterations = 0
 test_iterations = 0
 
-bauroc = BinaryAUROC(thresholds=10, average="weighted").to(device)
-
 
 @torch.no_grad()
-def get_auc_roc(prediction, target):
-    if prediction.min() >= 0.0 and prediction.max() <= 1.0:
-        score = bauroc(prediction.flatten(), target.flatten().long())
+def get_auc_roc(prediction, target, thresholds=10):
+    if prediction.shape[1] > 1:
+        metric = MulticlassAUROC(
+            num_classes=prediction.shape[1], thresholds=thresholds, average="weighted"
+        )
     else:
-        score = bauroc(nn.Sigmoid()(prediction.flatten()), target.flatten().long())
+        metric = BinaryAUROC(thresholds=thresholds)
+        prediction = prediction.squeeze(1)
+
+    metric = metric.to(device)
+    score = metric(prediction, target.long())
 
     return score
 
@@ -239,7 +244,7 @@ def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt, loss_da):
 
 
 @gin.configurable
-def get_optimizer(model, optimizer="AdamW", lr=1e-3):
+def get_optimizer(model, optimizer, lr):
     return getattr(torch.optim, optimizer)(model.parameters(), lr)
 
 
@@ -247,7 +252,7 @@ def get_optimizer(model, optimizer="AdamW", lr=1e-3):
 def freeze_backbone(model, freeze=False):
     if freeze:
         for param in model.backbone_fpn.backbone.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
 
         for param in model.backbone_fpn.backbone.model.layer4.parameters():
             param.requires_grad = True
@@ -276,22 +281,29 @@ def main():
     # misc #
     cfg = gin.parse_config_file("scripts/config.gin")
     torch.backends.cudnn.benchmark = True
+    batch_size = 8
 
     # dataset #
     root = "/media/muzg/D8F26982F269662A/bdd100k/bdd100k/"
     train_dataset = BDD100K(root, split="train", return_drivable_area=True)
     test_dataset = BDD100K(root, split="val", return_drivable_area=True)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=16, num_workers=8, drop_last=True
+        train_dataset, batch_size=batch_size, num_workers=8, drop_last=True
     )
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=16, num_workers=8, drop_last=True
+        test_dataset, batch_size=batch_size, num_workers=8, drop_last=True
     )
 
     # model #
-    model = FCOS().to(device)
+    num_classes = len(set(cat_to_num.values()))
+    if num_classes == 2:
+        model = FCOS(num_classes=1).to(device)
+    else:
+        model = FCOS(num_classes=num_classes).to(device)
     config = {
         "model_size": sum([p.numel() for p in model.parameters()]),
+        "num_classes": num_classes,
+        "batch_size": batch_size,
     }
     print(config)
     wandb.init(project="INZ", entity="maciejeg1337", config=config)
@@ -299,21 +311,21 @@ def main():
     optim = get_optimizer(model)
     model = freeze_backbone(model)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optim, 0.1, 2 * len(train_loader), div_factor=5000
+        optim, 0.2, 2 * len(train_loader), div_factor=5000
     )
-    loss_cls = FocalLoss(reduction="sum")
+
+    if num_classes > 2:
+        loss_cls = MulticlassFocalLoss(reduction="sum")
+    else:
+        loss_cls = FocalLoss(reduction="sum")
     loss_cnt = nn.BCEWithLogitsLoss()
     loss_reg = nn.L1Loss(reduction="none")
     loss_da = nn.BCEWithLogitsLoss()
     transforms = T.Compose(
-        [
-            T.RandomEqualize(),
-            T.RandomGrayscale(),
-            T.RandomAutocontrast(),
-        ]
+        [T.RandomEqualize(), T.RandomGrayscale(), T.RandomAutocontrast(),]
     )
 
-    for i in range(30):
+    for i in range(2):
         train_loss = train_epoch(
             model,
             train_loader,

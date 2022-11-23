@@ -73,3 +73,23 @@ class FocalLoss(nn.Module):
             else:
                 loss = loss / targets.numel()
         return loss
+
+
+class MulticlassFocalLoss(nn.Module):
+    def __init__(self, reduction="sum", alpha=0.25, gamma=2.0):
+        super(MulticlassFocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        cle_loss = F.cross_entropy(
+            inputs.float(), targets.long(), reduction=self.reduction
+        )
+        loss = self.alpha * (1 - torch.exp(-cle_loss)) ** self.gamma * cle_loss
+        if self.reduction == "sum":
+            if targets.sum() > 0:
+                loss = loss / (targets > 0).sum()
+            else:
+                loss = loss / targets.numel()
+        return loss

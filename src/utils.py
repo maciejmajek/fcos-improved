@@ -6,7 +6,7 @@ from torchvision.ops import FeaturePyramidNetwork
 from torchvision.models.resnet import resnet18, ResNet18_Weights
 from torchvision.models.resnet import resnet50, ResNet50_Weights
 
-INF = 10**10
+INF = 10 ** 10
 h, w = 6 * 128, 9 * 128
 overlap = 0.5  # Not implemented
 
@@ -79,7 +79,7 @@ def get_cls_target(boxes, strides, box_target_stride, labels, device):
                 and i < maps_cls[int(stride)].shape[1]
             ):
                 maps_cls[int(stride)][j, i] = labels[ij]
-        assert maps_cls[int(stride)].max() <= 1.0
+
         assert maps_cls[int(stride)].min() >= 0.0
     return maps_cls
 
@@ -149,7 +149,7 @@ def get_targets(boxes, strides, sizes, device):
     maps_reg = get_reg_target(boxes, strides, box_target_stride, device)
     maps_cnt = get_cnt_target(boxes, strides, maps_reg, device)
     for key in maps_cls:
-        maps_cnt[key] = maps_cnt[key] * maps_cls[key]
+        maps_cnt[key] = maps_cnt[key] * (maps_cls[key] != 0)
         reg = torch.zeros_like(maps_reg[key])
         reg[:, maps_cls[key].bool()] = maps_reg[key][:, maps_cls[key].bool()]
         maps_reg[key] = reg
@@ -417,10 +417,7 @@ class ResnetBacbone(torch.nn.Module):
         super().__init__()
         self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
         self.pre = torch.nn.Sequential(
-            self.model.conv1,
-            self.model.bn1,
-            self.model.relu,
-            self.model.maxpool,
+            self.model.conv1, self.model.bn1, self.model.relu, self.model.maxpool,
         )
         self.l1 = self.model.layer1
         self.l2 = self.model.layer2
@@ -481,12 +478,13 @@ class BackboneFPN(torch.nn.Module):
 
 
 class SegmentationHead(nn.Module):
-    def __init__(self, fpn_depth=128, tower_depth=4):
+    def __init__(self, fpn_depth=128, tower_depth=4, num_classes=1):
         super().__init__()
         self.fpn_depth = fpn_depth
         self.tower_depth = tower_depth
+        self.num_classes = num_classes
         self.head_tower = nn.ModuleList()
-        self.cls = nn.Conv2d(self.fpn_depth, 1, 3, padding=1)
+        self.cls = nn.Conv2d(self.fpn_depth, self.num_classes, 3, padding=1)
         for _ in range(self.tower_depth):
             self.head_tower.append(
                 nn.Conv2d(self.fpn_depth, self.fpn_depth, 3, padding=1)
