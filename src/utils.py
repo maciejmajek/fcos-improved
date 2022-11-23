@@ -4,13 +4,14 @@ import torch.nn as nn
 from collections import OrderedDict
 from torchvision.ops import FeaturePyramidNetwork
 from torchvision.models.resnet import resnet18, ResNet18_Weights
+from torchvision.models.resnet import resnet50, ResNet50_Weights
 
 INF = 10**10
 h, w = 6 * 128, 9 * 128
-overlap = 1.0  # Not implemented
+overlap = 0.5  # Not implemented
 
 object_sizes_of_interest = [
-    [-1, 64],
+    [-1, 64 * overlap],
     [overlap * 64, overlap * 128],
     [overlap * 128, overlap * 256],
     [overlap * 256, overlap * 512],
