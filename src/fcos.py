@@ -16,11 +16,18 @@ class Scale(nn.Module):
 
 @gin.configurable
 class FCOS(torch.nn.Module):
-    def __init__(self, backbone_depth=128, tower_depth=4):
+    def __init__(
+        self,
+        num_classes=1,
+        backbone_depth=128,
+        tower_depth=4,
+        strides=[8, 16, 32, 64, 128],
+    ):
         super().__init__()
+        self.num_classes = num_classes
         self.backbone_depth = backbone_depth
         self.tower_depth = tower_depth
-        self.strides = torch.tensor([8, 16, 32, 64, 128])
+        self.strides = torch.tensor(strides)
         self.backbone_fpn = BackboneFPN(depth=self.backbone_depth, return_list=True)
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()
@@ -45,10 +52,15 @@ class FCOS(torch.nn.Module):
 
         self.cls_tower = nn.Sequential(*self.cls_tower)
         self.bbox_tower = nn.Sequential(*self.bbox_tower)
-
-        self.cls = nn.Sequential(
-            nn.Conv2d(self.backbone_fpn.depth, 1, 3, padding=1), nn.Sigmoid()
-        )
+        if self.num_classes == 1:
+            self.cls = nn.Sequential(
+                nn.Conv2d(self.backbone_fpn.depth, self.num_classes, 3, padding=1),
+                nn.Sigmoid(),
+            )
+        else:
+            self.cls = nn.Sequential(
+                nn.Conv2d(self.backbone_fpn.depth, self.num_classes, 3, padding=1),
+            )
         self.cnt = nn.Conv2d(self.backbone_fpn.depth, 1, 3, padding=1)
         self.reg = nn.Conv2d(self.backbone_fpn.depth, 4, 3, padding=1)
 
@@ -82,15 +94,15 @@ class FCOS(torch.nn.Module):
             box_pred = self.scales[i](self.reg(l))
             reg.append(torch.exp(box_pred))
 
-        for i in range(len(self.strides)):
-            assert (
-                reg[i].min() >= 0.0
-            ), f"Min is {reg[i].min()} Max is {reg[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
-            assert (
-                cls[i].min() >= 0.0
-            ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
-            assert (
-                cls[i].max() <= 1.0
-            ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
+        # for i in range(len(self.strides)):
+        #    assert (
+        #        reg[i].min() >= 0.0
+        #    ), f"Min is {reg[i].min()} Max is {reg[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
+        #    assert (
+        #        cls[i].min() >= 0.0
+        #    ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
+        #    assert (
+        #        cls[i].max() <= 1.0
+        #    ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
 
         return cls, reg, cnt, da

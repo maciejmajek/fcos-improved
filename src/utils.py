@@ -1,4 +1,3 @@
-import timm
 import torch
 import torch.nn as nn
 from collections import OrderedDict
@@ -54,8 +53,11 @@ def calculate_centerness(l, t, r, b, sign="multiplication"):
 
 def prepare_box(box, stride):
     box = box / stride
-    box[0:2] = box[0:2].floor()
-    box[2:4] = box[2:4].ceil()
+    return box
+
+
+def extend_box(box):
+    box = box.round()
     box = box.int()
     return box
 
@@ -69,6 +71,7 @@ def get_cls_target(boxes, strides, box_target_stride, labels, device):
         return maps_cls
     for ij, (box, stride) in enumerate(zip(boxes.bbox, box_target_stride)):
         box = prepare_box(box, stride)
+        box = extend_box(box)
 
         locations = locations_inside_box(box)
         if locations == None:
@@ -79,8 +82,9 @@ def get_cls_target(boxes, strides, box_target_stride, labels, device):
                 and i < maps_cls[int(stride)].shape[1]
             ):
                 maps_cls[int(stride)][j, i] = labels[ij]
-        assert maps_cls[int(stride)].max() <= 1.0
+
         assert maps_cls[int(stride)].min() >= 0.0
+        assert torch.isnan(maps_cls[int(stride)]).any() == False, "NaN detected"
     return maps_cls
 
 
@@ -93,20 +97,30 @@ def get_reg_target(boxes, strides, box_target_stride, device):
         return maps_reg
     for ij, (box, stride) in enumerate(zip(boxes.bbox, box_target_stride)):
         box = prepare_box(box, stride)
-        locations = locations_inside_box(box)
+        extended_box = extend_box(box.clone())
+
+        locations = locations_inside_box(extended_box)
+
         if locations == None:
             continue
+
         for i, j in locations:
             l = i - box[0]
             r = box[2] - i
             t = j - box[1]
             b = box[3] - j
+
+            if min([l, t, r, b]) < 0:
+                continue
+
             try:
                 maps_reg[int(stride)][:, j, i] = torch.tensor([l, t, r, b])
             except IndexError as e:
                 pass  # print(e)
 
         assert maps_reg[int(stride)].min() >= 0.0
+        assert torch.isnan(maps_reg[int(stride)]).any() == False, "NaN detected"
+
     return maps_reg
 
 
@@ -121,8 +135,10 @@ def get_cnt_target(boxes, strides, maps_reg, device):
         l, t, r, b = value
         maps_cnt[key] = calculate_centerness(l, t, r, b)
         maps_cnt[key][maps_cnt[key].isnan()] = 0
+        maps_cnt[key][maps_cnt[key].isinf()] = 0
         assert maps_cnt[key].max() <= 1.0, f"Max is {maps_cnt[key].max()}"
         assert maps_cnt[key].min() >= 0.0, f"Min is {maps_cnt[key].min()}"
+        assert torch.isnan(maps_cnt[key]).any() == False, "NaN detected"
     return maps_cnt
 
 
@@ -149,7 +165,7 @@ def get_targets(boxes, strides, sizes, device):
     maps_reg = get_reg_target(boxes, strides, box_target_stride, device)
     maps_cnt = get_cnt_target(boxes, strides, maps_reg, device)
     for key in maps_cls:
-        maps_cnt[key] = maps_cnt[key] * maps_cls[key]
+        maps_cnt[key] = maps_cnt[key] * (maps_cls[key] != 0)
         reg = torch.zeros_like(maps_reg[key])
         reg[:, maps_cls[key].bool()] = maps_reg[key][:, maps_cls[key].bool()]
         maps_reg[key] = reg
@@ -481,12 +497,13 @@ class BackboneFPN(torch.nn.Module):
 
 
 class SegmentationHead(nn.Module):
-    def __init__(self, fpn_depth=128, tower_depth=4):
+    def __init__(self, fpn_depth=128, tower_depth=4, num_classes=1):
         super().__init__()
         self.fpn_depth = fpn_depth
         self.tower_depth = tower_depth
+        self.num_classes = num_classes
         self.head_tower = nn.ModuleList()
-        self.cls = nn.Conv2d(self.fpn_depth, 1, 3, padding=1)
+        self.cls = nn.Conv2d(self.fpn_depth, self.num_classes, 3, padding=1)
         for _ in range(self.tower_depth):
             self.head_tower.append(
                 nn.Conv2d(self.fpn_depth, self.fpn_depth, 3, padding=1)

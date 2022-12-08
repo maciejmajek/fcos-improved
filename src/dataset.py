@@ -25,16 +25,16 @@ from src.utils import object_sizes_of_interest
 # cat_to_num = {v: k for k, v in categories.items()}
 
 cat_to_num = {
-    "pedestrian": 0,
-    "rider": 0,
-    "car": 1,
-    "truck": 1,
-    "bus": 1,
-    "train": 0,
-    "motorcycle": 0,
-    "bicycle": 0,
-    "traffic light": 0,
-    "traffic sign": 0,
+    "pedestrian": 1,
+    "rider": 2,
+    "car": 3,
+    "truck": 4,
+    "bus": 5,
+    "train": 6,
+    "motorcycle": 7,
+    "bicycle": 8,
+    "traffic light": 9,
+    "traffic sign": 10,
     "other vehicle": 0,
     "other person": 0,
     "trailer": 0,
@@ -73,13 +73,20 @@ def get_box_list(boxes, h=720, w=1280):
     return box_list
 
 
-def get_trainable_targets(data, name):
+def get_trainable_targets(data, name, sort=False, reverse=True):
     labels = get_labels(data, name)
     if labels == None:
         return None
     boxes = get_boxes(labels)
+    if sort:
+        boxes_sorted = sorted(
+            boxes, key=lambda x: (x[2] - x[0]) * (x[3] - x[1]), reverse=reverse
+        )
+        indexes = [boxes.index(value) for value in boxes_sorted]
     boxes = get_box_list(boxes)
     categories = get_categories(labels)
+    if sort:
+        categories = [categories[index] for index in indexes]
     h, w = 6 * 128, 9 * 128
     boxes = boxes.resize((h, w))
     boxes.extra_fields["labels"] = torch.tensor(categories)
