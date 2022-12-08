@@ -16,12 +16,18 @@ class Scale(nn.Module):
 
 @gin.configurable
 class FCOS(torch.nn.Module):
-    def __init__(self, num_classes=1, backbone_depth=128, tower_depth=4):
+    def __init__(
+        self,
+        num_classes=1,
+        backbone_depth=128,
+        tower_depth=4,
+        strides=[8, 16, 32, 64, 128],
+    ):
         super().__init__()
         self.num_classes = num_classes
         self.backbone_depth = backbone_depth
         self.tower_depth = tower_depth
-        self.strides = torch.tensor([8, 16, 32, 64, 128])
+        self.strides = torch.tensor(strides)
         self.backbone_fpn = BackboneFPN(depth=self.backbone_depth, return_list=True)
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()

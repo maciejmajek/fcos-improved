@@ -48,11 +48,12 @@ class IOULoss(nn.Module):
         else:
             raise NotImplementedError
 
-        if weight is not None and weight.sum() > 0:
-            return (losses * weight).sum()
-        else:
-            assert losses.numel() != 0
-            return losses.mean()
+        return losses
+        #if weight is not None and weight.sum() > 0:
+        #    return (losses * weight).sum()
+        #else:
+        #    assert losses.numel() != 0
+        #    return losses.mean()
 
 
 class FocalLoss(nn.Module):

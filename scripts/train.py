@@ -74,10 +74,11 @@ def train_step(
         loss["cls"] += loss_fn_cls(p_cls.squeeze(1), t_cls)
         if t_cnt.sum() > 0:
             loss["reg"] += (
-                loss_fn_reg(p_reg, t_reg).mean(1) * t_cnt
+                loss_fn_reg(p_reg, t_reg) * t_cnt
             ).sum() / t_cnt.sum()
         else:
             loss["reg"] += torch.tensor(0.0).to(device)
+
         loss["cnt"] += loss_fn_cnt(p_cnt.squeeze(1), t_cnt)
         if train_iterations % 10 == 0:
             auc_rocs["cls"].append(get_auc_roc(p_cls, t_cls))
@@ -132,7 +133,7 @@ def test_step(
         loss["cls"] += loss_fn_cls(p_cls.squeeze(1), t_cls)
         if t_cnt.sum() > 0:
             loss["reg"] += (
-                loss_fn_reg(p_reg, t_reg).mean(1) * t_cnt
+                loss_fn_reg(p_reg, t_reg) * t_cnt
             ).sum() / t_cnt.sum()
         else:
             loss["reg"] += torch.tensor(0.0).to(device)
@@ -228,8 +229,7 @@ def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt, loss_da):
             loss_cnt,
             loss_da,
         )
-        log = {"Test/Loss/" + k: v.item() for k, v in loss.items()}
-
+        log = {}
         for i, f1 in enumerate(auc_rocs["cls"]):
             log[f"Test/ROCAUC/cls_{model.strides[i]}"] = f1.item()
         log["Test/ROCAUC/da"] = auc_rocs["da"]
@@ -252,16 +252,16 @@ def get_optimizer(model, optimizer, lr):
 def freeze_backbone(model, freeze=False):
     if freeze:
         for param in model.backbone_fpn.backbone.parameters():
-            param.requires_grad = True
+            param.requires_grad = False
 
         for param in model.backbone_fpn.backbone.model.layer4.parameters():
-            param.requires_grad = True
+            param.requires_grad = False
 
         for param in model.backbone_fpn.backbone.model.layer3.parameters():
-            param.requires_grad = True
+            param.requires_grad = False
 
         for param in model.backbone_fpn.backbone.model.layer2.parameters():
-            param.requires_grad = True
+            param.requires_grad = False
 
     return model
 
@@ -288,7 +288,11 @@ def main():
     train_dataset = BDD100K(root, split="train", return_drivable_area=True)
     test_dataset = BDD100K(root, split="val", return_drivable_area=True)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=batch_size, num_workers=8, drop_last=True
+        train_dataset,
+        batch_size=batch_size,
+        num_workers=8,
+        drop_last=True,
+        shuffle=False,
     )
     test_loader = torch.utils.data.DataLoader(
         test_dataset, batch_size=batch_size, num_workers=8, drop_last=True
@@ -308,10 +312,11 @@ def main():
     print(config)
     wandb.init(project="INZ", entity="maciejeg1337", config=config)
     wandb.watch(model)
+    epochs = 2
     optim = get_optimizer(model)
     model = freeze_backbone(model)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optim, 0.2, 2 * len(train_loader), div_factor=5000
+        optim, 0.05, epochs * len(train_loader), div_factor=5000,
     )
 
     if num_classes > 2:
@@ -319,13 +324,17 @@ def main():
     else:
         loss_cls = FocalLoss(reduction="sum")
     loss_cnt = nn.BCEWithLogitsLoss()
-    loss_reg = nn.L1Loss(reduction="none")
+    loss_reg = IOULoss()
     loss_da = nn.BCEWithLogitsLoss()
     transforms = T.Compose(
-        [T.RandomEqualize(), T.RandomGrayscale(), T.RandomAutocontrast(),]
+        [
+            T.RandomEqualize(),
+            T.RandomGrayscale(),
+            T.RandomAutocontrast(),
+        ]
     )
 
-    for i in range(2):
+    for i in range(epochs):
         train_loss = train_epoch(
             model,
             train_loader,

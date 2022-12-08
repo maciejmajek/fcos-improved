@@ -1,6 +1,6 @@
 FCOS.backbone_depth=128
 FCOS.tower_depth=4
-freeze_backbone.freeze=True
+freeze_backbone.freeze=False
 get_optimizer.optimizer="SGD"
 get_optimizer.lr=1e-2
 save_model.prefix="model_0.01"
