@@ -3,9 +3,14 @@ import torch.nn as nn
 from collections import OrderedDict
 from torchvision.ops import FeaturePyramidNetwork
 from torchvision.models.resnet import resnet18, ResNet18_Weights
+from torchvision.models.mobilenetv3 import (
+    mobilenet_v3_small,
+    MobileNet_V3_Small_Weights,
+)
 from torchvision.models.resnet import resnet50, ResNet50_Weights
+from torchvision.models.convnext import convnext_tiny, ConvNeXt_Tiny_Weights
 
-INF = 10**10
+INF = 10 ** 10
 h, w = 6 * 128, 9 * 128
 overlap = 0.5  # Not implemented
 
@@ -278,7 +283,7 @@ class BoxList(object):
                 bbox.add_field(k, v)
             return bbox
 
-        ratio_height, ratio_width = ratios
+        ratio_height, ratio_width = ratios[::-1]
         xmin, ymin, xmax, ymax = self._split_into_xyxy()
 
         scaled_xmin = xmin * ratio_width
@@ -429,14 +434,11 @@ class BoxList(object):
 
 
 class ResnetBacbone(torch.nn.Module):
-    def __init__(self, size="50"):
+    def __init__(self):
         super().__init__()
         self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
         self.pre = torch.nn.Sequential(
-            self.model.conv1,
-            self.model.bn1,
-            self.model.relu,
-            self.model.maxpool,
+            self.model.conv1, self.model.bn1, self.model.relu, self.model.maxpool,
         )
         self.l1 = self.model.layer1
         self.l2 = self.model.layer2
@@ -454,6 +456,51 @@ class ResnetBacbone(torch.nn.Module):
         output["feat0"] = x2
         output["feat1"] = x3
         output["feat2"] = x4
+        return output
+
+
+class MobileNetBackbone(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = mobilenet_v3_small(weights=MobileNet_V3_Small_Weights.DEFAULT)
+        self.l1 = self.model.features[0:4]
+        self.l2 = self.model.features[4:9]
+        self.l3 = self.model.features[9:13]
+
+        self.depth_channels = [24, 48, 576]
+
+    def forward(self, x):
+        x1 = self.l1(x)
+        x2 = self.l2(x1)
+        x3 = self.l3(x2)
+        output = OrderedDict()
+        output["feat0"] = x1
+        output["feat1"] = x2
+        output["feat2"] = x3
+        return output
+
+
+class ConvNextBackbone(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+        del self.model.classifier
+        self.pre = self.model.features[0:2]
+        self.l1 = self.model.features[2:4]
+        self.l2 = self.model.features[4:6]
+        self.l3 = self.model.features[6:8]
+
+        self.depth_channels = [192, 384, 768]
+
+    def forward(self, x):
+        x = self.pre(x)
+        x1 = self.l1(x)
+        x2 = self.l2(x1)
+        x3 = self.l3(x2)
+        output = OrderedDict()
+        output["feat0"] = x1
+        output["feat1"] = x2
+        output["feat2"] = x3
         return output
 
 
@@ -481,7 +528,7 @@ class BackboneFPN(torch.nn.Module):
         super().__init__()
         self.depth = depth
         self.return_list = return_list
-        self.backbone = ResnetBacbone("14t")
+        self.backbone = ResnetBacbone()
         self.fpn = FeaturePyramidNetwork(self.backbone.depth_channels, self.depth)
         self.fpn_top = FPN_P6P7(self.depth)
 
