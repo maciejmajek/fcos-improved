@@ -86,23 +86,12 @@ class FCOS(torch.nn.Module):
         reg = []
         cnt = []
 
-        for i, l in enumerate([self.cls_tower(i) for i in x]):
-            cls.append(self.cls(l))
-            cnt.append(self.cnt(l))
+        for i, fpn_map in enumerate(x):
+            cls_tower_map = self.cls_tower(fpn_map)
+            reg_tower_map = self.bbox_tower(fpn_map)
 
-        for i, l in enumerate([self.bbox_tower(i) for i in x]):
-            box_pred = self.scales[i](self.reg(l))
-            reg.append(torch.exp(box_pred))
-
-        # for i in range(len(self.strides)):
-        #    assert (
-        #        reg[i].min() >= 0.0
-        #    ), f"Min is {reg[i].min()} Max is {reg[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
-        #    assert (
-        #        cls[i].min() >= 0.0
-        #    ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
-        #    assert (
-        #        cls[i].max() <= 1.0
-        #    ), f"Min is {cls[i].min()} Max is {cls[i].max()} stride: {self.strides[i]} p: {self.scales[i].scale}"
+            cls.append(self.cls(cls_tower_map))
+            cnt.append(self.cnt(cls_tower_map))
+            reg.append(self.scales[i](torch.exp(self.reg(reg_tower_map)-1.0)))
 
         return cls, reg, cnt, da

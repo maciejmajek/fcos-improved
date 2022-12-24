@@ -10,7 +10,7 @@ from torchvision.models.mobilenetv3 import (
 from torchvision.models.resnet import resnet50, ResNet50_Weights
 from torchvision.models.convnext import convnext_tiny, ConvNeXt_Tiny_Weights
 
-INF = 10 ** 10
+INF = 10**10
 h, w = 6 * 128, 9 * 128
 overlap = 0.5  # Not implemented
 
@@ -114,9 +114,10 @@ def get_reg_target(boxes, strides, box_target_stride, device):
             r = box[2] - i
             t = j - box[1]
             b = box[3] - j
-
-            if min([l, t, r, b]) < 0:
-                continue
+            l = torch.max(torch.tensor(0.0), l)
+            t = torch.max(torch.tensor(0.0), t)
+            r = torch.max(torch.tensor(0.0), r)
+            b = torch.max(torch.tensor(0.0), b)
 
             try:
                 maps_reg[int(stride)][:, j, i] = torch.tensor([l, t, r, b])
@@ -433,12 +434,15 @@ class BoxList(object):
         return s
 
 
-class ResnetBacbone(torch.nn.Module):
+class Resnet18Bacbone(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
         self.pre = torch.nn.Sequential(
-            self.model.conv1, self.model.bn1, self.model.relu, self.model.maxpool,
+            self.model.conv1,
+            self.model.bn1,
+            self.model.relu,
+            self.model.maxpool,
         )
         self.l1 = self.model.layer1
         self.l2 = self.model.layer2
@@ -458,6 +462,34 @@ class ResnetBacbone(torch.nn.Module):
         output["feat2"] = x4
         return output
 
+
+class Resnet50Bacbone(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = resnet50(weights=ResNet50_Weights.DEFAULT)
+        self.pre = torch.nn.Sequential(
+            self.model.conv1,
+            self.model.bn1,
+            self.model.relu,
+            self.model.maxpool,
+        )
+        self.l1 = self.model.layer1
+        self.l2 = self.model.layer2
+        self.l3 = self.model.layer3
+        self.l4 = self.model.layer4
+        self.depth_channels = [512, 1024, 2048]
+
+    def forward(self, x):
+        x = self.pre(x)
+        x1 = self.l1(x)
+        x2 = self.l2(x1)
+        x3 = self.l3(x2)
+        x4 = self.l4(x3)
+        output = OrderedDict()
+        output["feat0"] = x2
+        output["feat1"] = x3
+        output["feat2"] = x4
+        return output
 
 class MobileNetBackbone(torch.nn.Module):
     def __init__(self):
@@ -528,7 +560,7 @@ class BackboneFPN(torch.nn.Module):
         super().__init__()
         self.depth = depth
         self.return_list = return_list
-        self.backbone = ResnetBacbone()
+        self.backbone = Resnet50Bacbone()
         self.fpn = FeaturePyramidNetwork(self.backbone.depth_channels, self.depth)
         self.fpn_top = FPN_P6P7(self.depth)
 

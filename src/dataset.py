@@ -26,15 +26,15 @@ from src.utils import object_sizes_of_interest
 
 cat_to_num = {
     "pedestrian": 1,
-    "rider": 2,
-    "car": 3,
-    "truck": 4,
-    "bus": 5,
-    "train": 6,
-    "motorcycle": 7,
-    "bicycle": 8,
-    "traffic light": 9,
-    "traffic sign": 10,
+    "rider": 0,
+    "car": 2,
+    "truck": 3,
+    "bus": 4,
+    "train": 0,
+    "motorcycle": 5,
+    "bicycle": 6,
+    "traffic light": 7,
+    "traffic sign": 8,
     "other vehicle": 0,
     "other person": 0,
     "trailer": 0,
@@ -255,6 +255,7 @@ class BDD100K(torch.utils.data.Dataset):
         return_detection=True,
         return_drivable_area=False,
         return_bboxes=False,
+        test_mode = False,
     ):
         super().__init__()
         self.root = root
@@ -263,6 +264,7 @@ class BDD100K(torch.utils.data.Dataset):
         self.return_detection = return_detection
         self.return_drivable = return_drivable_area
         self.return_bboxes = return_bboxes
+        self.test_mode = test_mode
         self.det = json.load(
             open(f"{self.root}/labels/det_20/det_{self.split}.json", "r")
         )
@@ -296,10 +298,16 @@ class BDD100K(torch.utils.data.Dataset):
         img = resize(img)
         img = img / 255.0
         returns = [img]
+        if self.test_mode:
+            box_list = get_trainable_targets(
+                data, self.images[idx], sort=True, reverse=False
+            )
+            returns.append(box_list)
+            return returns
         box_list = None
         if self.return_detection:
             box_list = get_trainable_targets(
-                data, self.images[idx], sort=False, reverse=True
+                data, self.images[idx], sort=True, reverse=False
             )
             maps_cls, maps_reg, maps_cnt = get_targets(
                 box_list, strides, object_sizes_of_interest, "cpu"
