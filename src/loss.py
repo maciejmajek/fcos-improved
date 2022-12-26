@@ -49,15 +49,10 @@ class IOULoss(nn.Module):
             raise NotImplementedError
 
         return losses
-        # if weight is not None and weight.sum() > 0:
-        #    return (losses * weight).sum()
-        # else:
-        #    assert losses.numel() != 0
-        #    return losses.mean()
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, reduction="sum", alpha=1.0, gamma=5.0):
+    def __init__(self, reduction="sum", alpha=1.0, gamma=2.0):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
@@ -77,19 +72,15 @@ class FocalLoss(nn.Module):
 
 
 class MulticlassFocalLoss(nn.Module):
-    def __init__(self, reduction="sum", alpha=1.0, gamma=4.0, weight=None):
+    def __init__(self, reduction="sum", alpha=1.0, gamma=2.0):
         super(MulticlassFocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
         self.reduction = reduction
-        self.weight = weight
 
     def forward(self, inputs, targets):
         cle_loss = F.cross_entropy(
-            inputs.float(),
-            targets.long(),
-            reduction=self.reduction,
-            weight=self.weight,
+            inputs.float(), targets.long(), reduction=self.reduction,
         )
         loss = self.alpha * (1 - torch.exp(-cle_loss)) ** self.gamma * cle_loss
         if self.reduction == "sum":

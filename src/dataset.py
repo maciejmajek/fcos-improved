@@ -255,7 +255,7 @@ class BDD100K(torch.utils.data.Dataset):
         return_detection=True,
         return_drivable_area=False,
         return_bboxes=False,
-        test_mode = False,
+        test_mode=False,
     ):
         super().__init__()
         self.root = root

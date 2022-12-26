@@ -10,7 +10,7 @@ from torchvision.models.mobilenetv3 import (
 from torchvision.models.resnet import resnet50, ResNet50_Weights
 from torchvision.models.convnext import convnext_tiny, ConvNeXt_Tiny_Weights
 
-INF = 10**10
+INF = 10 ** 10
 h, w = 6 * 128, 9 * 128
 overlap = 0.5  # Not implemented
 
@@ -439,10 +439,7 @@ class Resnet18Bacbone(torch.nn.Module):
         super().__init__()
         self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
         self.pre = torch.nn.Sequential(
-            self.model.conv1,
-            self.model.bn1,
-            self.model.relu,
-            self.model.maxpool,
+            self.model.conv1, self.model.bn1, self.model.relu, self.model.maxpool,
         )
         self.l1 = self.model.layer1
         self.l2 = self.model.layer2
@@ -463,15 +460,12 @@ class Resnet18Bacbone(torch.nn.Module):
         return output
 
 
-class Resnet50Bacbone(torch.nn.Module):
+class Resnet50Backbone(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.model = resnet50(weights=ResNet50_Weights.DEFAULT)
         self.pre = torch.nn.Sequential(
-            self.model.conv1,
-            self.model.bn1,
-            self.model.relu,
-            self.model.maxpool,
+            self.model.conv1, self.model.bn1, self.model.relu, self.model.maxpool,
         )
         self.l1 = self.model.layer1
         self.l2 = self.model.layer2
@@ -490,6 +484,7 @@ class Resnet50Bacbone(torch.nn.Module):
         output["feat1"] = x3
         output["feat2"] = x4
         return output
+
 
 class MobileNetBackbone(torch.nn.Module):
     def __init__(self):
@@ -541,11 +536,11 @@ class FPN_P6P7(torch.nn.Module):
         super().__init__()
         self.p6 = torch.nn.Sequential(
             torch.nn.Conv2d(channels, channels, 3, padding=1, stride=2),
-            torch.nn.ReLU(),
+            torch.nn.GELU(),
         )
         self.p7 = torch.nn.Sequential(
             torch.nn.Conv2d(channels, channels, 3, padding=1, stride=2),
-            torch.nn.ReLU(),
+            torch.nn.GELU(),
         )
 
     def forward(self, x):
@@ -556,11 +551,11 @@ class FPN_P6P7(torch.nn.Module):
 
 
 class BackboneFPN(torch.nn.Module):
-    def __init__(self, depth=256, return_list=False):
+    def __init__(self, backbone, depth, return_list=False):
         super().__init__()
         self.depth = depth
         self.return_list = return_list
-        self.backbone = Resnet50Bacbone()
+        self.backbone = backbone()
         self.fpn = FeaturePyramidNetwork(self.backbone.depth_channels, self.depth)
         self.fpn_top = FPN_P6P7(self.depth)
 
@@ -588,7 +583,7 @@ class SegmentationHead(nn.Module):
                 nn.Conv2d(self.fpn_depth, self.fpn_depth, 3, padding=1)
             )
             self.head_tower.append(nn.GroupNorm(32, self.fpn_depth))
-            self.head_tower.append(nn.ReLU())
+            self.head_tower.append(nn.GELU())
 
     def forward(self, x):
         for layer in self.head_tower:

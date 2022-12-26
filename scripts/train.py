@@ -8,6 +8,7 @@ from src.fcos import FCOS
 from src.loss import IOULoss, FocalLoss, MulticlassFocalLoss
 from src.dataset import BDD100K
 from src.dataset import cat_to_num
+import src.utils as architecture
 from torchmetrics.classification import BinaryAUROC
 from torchmetrics.classification import MulticlassAUROC
 import torchvision.transforms as T
@@ -76,8 +77,10 @@ def train_step(
             x.to(device, non_blocking=True) for x in [t_cls, t_reg, t_cnt]
         ]
         loss["cls"] += loss_fn_cls(p_cls.squeeze(1), t_cls)
-        if t_cnt.sum() > 0:
-            loss["reg"] += (loss_fn_reg(p_reg, t_reg) * t_cnt).sum() / t_cnt.sum()
+        if t_cls.sum() > 0:
+            loss["reg"] += (loss_fn_reg(p_reg, t_reg) * (t_cls > 0)).sum() / (
+                t_cls > 0
+            ).sum()
         else:
             loss["reg"] += torch.tensor(0.0).to(device)
 
@@ -197,7 +200,7 @@ def train_epoch(
             log["lr"] = scheduler.get_last_lr()[-1]
         wandb.log(log)
 
-        loss = loss["cls"] + loss["reg"] + loss["cnt"]# + loss["da"]
+        loss = loss["cls"] + loss["reg"] + loss["cnt"] + loss["da"]
         epoch_loss += (loss).item()
 
         scaler.scale(loss).backward()
@@ -248,7 +251,6 @@ def test_epoch(model, loader, loss_cls, loss_reg, loss_cnt, loss_da):
 
 @gin.configurable
 def get_optimizer(model, optimizer, lr):
-    #return torch.optim.AdamW(model.parameters())
     return getattr(torch.optim, optimizer)(
         model.parameters(), lr, weight_decay=0.0001, momentum=0.9
     )
@@ -274,16 +276,50 @@ def save_model(model, i, prefix="model_", suffix="None", folder_name=None):
         torch.save(model.state_dict(), f"{prefix}{i}{suffix}.pth")
 
 
+@gin.configurable
+def build_model(
+    backbone_name, fpn_channels, tower_depth, num_classes_det, freeze_backbone
+):
+    backbone = getattr(architecture, backbone_name)
+    model = FCOS(
+        backbone=backbone,
+        num_classes=num_classes_det,
+        fpn_channels=fpn_channels,
+        tower_depth=tower_depth,
+    )
+
+    if freeze_backbone:
+        for param in model.backbone_fpn.backbone.parameters():
+            param.requires_grad = False
+
+    return model
+
+
+@gin.configurable
+def training_configuration(num_epochs, batch_size):
+    return num_epochs, batch_size
+
+
+@gin.configurable
+def build_datasets(root, size_limit_train, size_limit_val):
+    train_dataset = BDD100K(
+        root, split="train", return_drivable_area=True, size=size_limit_train
+    )
+    test_dataset = BDD100K(
+        root, split="val", return_drivable_area=True, size=size_limit_val
+    )
+    return train_dataset, test_dataset
+
+
 def main():
     # misc #
     cfg = gin.parse_config_file("scripts/config.gin")
     torch.backends.cudnn.benchmark = True
-    batch_size = 4
 
     # dataset #
-    root = "/media/muzg/D8F26982F269662A/bdd100k/bdd100k/"
-    train_dataset = BDD100K(root, split="train", return_drivable_area=True)
-    test_dataset = BDD100K(root, split="val", return_drivable_area=True)
+    epochs, batch_size = training_configuration()
+    train_dataset, test_dataset = build_datasets()
+
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -296,39 +332,22 @@ def main():
     )
 
     # model #
-    num_classes = len(set(cat_to_num.values()))
-    if num_classes == 2:
-        model = FCOS(num_classes=1).to(device)
-    else:
-        model = FCOS(num_classes=num_classes).to(device)
-
+    model = build_model().to(device)
     optim = get_optimizer(model)
-    model = freeze_backbone(model)
-
-
-    epochs = 3
 
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optim,
-        0.02,
-        epochs * len(train_loader),
-        div_factor=5000,
+        optim, 0.04, epochs * len(train_loader), div_factor=5000,
     )
 
+    num_classes = len(set(cat_to_num.values()))
     if num_classes > 2:
         loss_cls = MulticlassFocalLoss(reduction="sum")
     else:
         loss_cls = FocalLoss(reduction="sum")
     loss_cnt = nn.BCEWithLogitsLoss().to(device)
-    loss_reg = IOULoss('giou')
+    loss_reg = IOULoss("giou")
     loss_da = nn.BCEWithLogitsLoss()
-    transforms = T.Compose(
-        [
-            T.RandomEqualize(),
-            T.RandomGrayscale(),
-            T.RandomAutocontrast(),
-        ]
-    )
+
     config = {
         "model_size": sum([p.numel() for p in model.parameters()]),
         "num_classes": num_classes,
@@ -356,7 +375,6 @@ def main():
             loss_da,
             optim,
             scheduler,
-            #transforms,
         )
         wandb.log({"Train/Loss": train_loss})
         save_model(model, i, folder_name=wandb.run.name)

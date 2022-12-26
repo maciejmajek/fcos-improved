@@ -14,24 +14,26 @@ class Scale(nn.Module):
         return input * self.scale
 
 
-@gin.configurable
 class FCOS(torch.nn.Module):
     def __init__(
         self,
+        backbone,
         num_classes=1,
-        backbone_depth=128,
+        fpn_channels=128,
         tower_depth=4,
         strides=[8, 16, 32, 64, 128],
     ):
         super().__init__()
         self.num_classes = num_classes
-        self.backbone_depth = backbone_depth
+        self.fpn_channels = fpn_channels
         self.tower_depth = tower_depth
         self.strides = torch.tensor(strides)
-        self.backbone_fpn = BackboneFPN(depth=self.backbone_depth, return_list=True)
+        self.backbone_fpn = BackboneFPN(
+            backbone=backbone, depth=self.fpn_channels, return_list=True
+        )
         self.cls_tower = nn.ModuleList()
         self.bbox_tower = nn.ModuleList()
-        self.segmentation_head = SegmentationHead(self.backbone_depth, self.tower_depth)
+        self.segmentation_head = SegmentationHead(self.fpn_channels, self.tower_depth)
         self.scales = nn.ModuleList([Scale(init_value=1.0) for _ in range(5)])
 
         for _ in range(tower_depth):
@@ -41,14 +43,14 @@ class FCOS(torch.nn.Module):
                 )
             )
             self.cls_tower.append(nn.GroupNorm(32, self.backbone_fpn.depth))
-            self.cls_tower.append(nn.ReLU())
+            self.cls_tower.append(nn.GELU())
             self.bbox_tower.append(
                 nn.Conv2d(
                     self.backbone_fpn.depth, self.backbone_fpn.depth, 3, padding=1
                 )
             )
             self.bbox_tower.append(nn.GroupNorm(32, self.backbone_fpn.depth))
-            self.bbox_tower.append(nn.ReLU())
+            self.bbox_tower.append(nn.GELU())
 
         self.cls_tower = nn.Sequential(*self.cls_tower)
         self.bbox_tower = nn.Sequential(*self.bbox_tower)
@@ -92,6 +94,6 @@ class FCOS(torch.nn.Module):
 
             cls.append(self.cls(cls_tower_map))
             cnt.append(self.cnt(cls_tower_map))
-            reg.append(self.scales[i](torch.exp(self.reg(reg_tower_map)-1.0)))
+            reg.append(self.scales[i](torch.exp(self.reg(reg_tower_map) - 1.0)))
 
         return cls, reg, cnt, da
