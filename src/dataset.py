@@ -26,15 +26,15 @@ from src.utils import object_sizes_of_interest
 
 cat_to_num = {
     "pedestrian": 1,
-    "rider": 2,
-    "car": 3,
-    "truck": 4,
-    "bus": 5,
-    "train": 6,
-    "motorcycle": 7,
-    "bicycle": 8,
-    "traffic light": 9,
-    "traffic sign": 10,
+    "rider": 0,
+    "car": 2,
+    "truck": 3,
+    "bus": 4,
+    "train": 0,
+    "motorcycle": 5,
+    "bicycle": 6,
+    "traffic light": 7,
+    "traffic sign": 8,
     "other vehicle": 0,
     "other person": 0,
     "trailer": 0,
@@ -69,7 +69,7 @@ def get_categories(labels):
 
 
 def get_box_list(boxes, h=720, w=1280):
-    box_list = BoxList(boxes, (h, w))
+    box_list = BoxList(boxes, (w, h))
     return box_list
 
 
@@ -83,12 +83,14 @@ def get_trainable_targets(data, name, sort=False, reverse=True):
             boxes, key=lambda x: (x[2] - x[0]) * (x[3] - x[1]), reverse=reverse
         )
         indexes = [boxes.index(value) for value in boxes_sorted]
+        labels = [labels[idx] for idx in indexes]
+        boxes = boxes_sorted
+
     boxes = get_box_list(boxes)
     categories = get_categories(labels)
-    if sort:
-        categories = [categories[index] for index in indexes]
+
     h, w = 6 * 128, 9 * 128
-    boxes = boxes.resize((h, w))
+    boxes = boxes.resize((w, h))
     boxes.extra_fields["labels"] = torch.tensor(categories)
     return boxes
 
@@ -252,6 +254,8 @@ class BDD100K(torch.utils.data.Dataset):
         size=100_000,
         return_detection=True,
         return_drivable_area=False,
+        return_bboxes=False,
+        test_mode=False,
     ):
         super().__init__()
         self.root = root
@@ -259,6 +263,8 @@ class BDD100K(torch.utils.data.Dataset):
         self.size = size
         self.return_detection = return_detection
         self.return_drivable = return_drivable_area
+        self.return_bboxes = return_bboxes
+        self.test_mode = test_mode
         self.det = json.load(
             open(f"{self.root}/labels/det_20/det_{self.split}.json", "r")
         )
@@ -292,9 +298,17 @@ class BDD100K(torch.utils.data.Dataset):
         img = resize(img)
         img = img / 255.0
         returns = [img]
-
+        if self.test_mode:
+            box_list = get_trainable_targets(
+                data, self.images[idx], sort=True, reverse=False
+            )
+            returns.append(box_list)
+            return returns
+        box_list = None
         if self.return_detection:
-            box_list = get_trainable_targets(data, self.images[idx])
+            box_list = get_trainable_targets(
+                data, self.images[idx], sort=True, reverse=False
+            )
             maps_cls, maps_reg, maps_cnt = get_targets(
                 box_list, strides, object_sizes_of_interest, "cpu"
             )
@@ -309,6 +323,8 @@ class BDD100K(torch.utils.data.Dataset):
             drivable_area = resize_no_interp(drivable_area)
             returns.append(drivable_area.long())
 
+        if self.return_bboxes and box_list != None:
+            returns.append(box_list)
         return returns
 
     def __getitem__(self, idx):
