@@ -37,3 +37,23 @@ Training procedure is fully configurable in scripts/config.gin file. By default 
 # Example output
 ![Example output 1](/img/ex1.jpg "Example output 1")
 ![Example output 2](/img/ex2.jpg "Example output 2")
+
+## Original work
+```bib
+@article{DBLP:journals/corr/abs-1904-01355,
+  author       = {Zhi Tian and
+                  Chunhua Shen and
+                  Hao Chen and
+                  Tong He},
+  title        = {{FCOS:} Fully Convolutional One-Stage Object Detection},
+  journal      = {CoRR},
+  volume       = {abs/1904.01355},
+  year         = {2019},
+  url          = {http://arxiv.org/abs/1904.01355},
+  eprinttype    = {arXiv},
+  eprint       = {1904.01355},
+  timestamp    = {Tue, 07 Mar 2023 08:43:10 +0100},
+  biburl       = {https://dblp.org/rec/journals/corr/abs-1904-01355.bib},
+  bibsource    = {dblp computer science bibliography, https://dblp.org}
+}
+```
