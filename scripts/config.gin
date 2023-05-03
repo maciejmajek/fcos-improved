@@ -4,7 +4,7 @@ build_model.tower_depth=4
 build_model.num_classes_det=9
 build_model.freeze_backbone=False
 
-build_datasets.root='/media/muzg/D8F26982F269662A/bdd100k/bdd100k/'
+build_datasets.root='bdd100kroot'
 build_datasets.size_limit_train=100_000
 build_datasets.size_limit_val=100_000
 

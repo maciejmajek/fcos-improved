@@ -434,7 +434,7 @@ class BoxList(object):
         return s
 
 
-class Resnet18Bacbone(torch.nn.Module):
+class Resnet18Backbone(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.model = resnet18(weights=ResNet18_Weights.DEFAULT)

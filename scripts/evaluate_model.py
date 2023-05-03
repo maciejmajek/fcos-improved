@@ -16,7 +16,7 @@ from src.dataset import BDD100K
 from torchvision.io import read_image
 from src.utils import *
 
-root = "/media/muzg/D8F26982F269662A/bdd100k/bdd100k/"
+root = "bdd100k_path"
 dataset = BDD100K(root, split="val", test_mode=True)
 
 def box_to_bb(center, ltrb):
@@ -85,7 +85,7 @@ device = 'cpu'
 model = FCOS(backbone=Resnet50Backbone, num_classes=9, fpn_channels=256)
 model.load_state_dict(
     torch.load(
-        "/home/muzg/Thesis/model_0.012.pth",
+        "model_path",
         map_location=device,
     )
 )
